@@ -23,10 +23,9 @@
 html, body {
     margin: 0;
     padding: 0;
-    /* সব ব্রাউজারের জন্য ৩ লেয়ারের সিকিউরিটি */
     height: 100%; 
-    height: -webkit-fill-available; /* সাফারি এবং আইওএস (iOS) ফিক্স */
-    height: 100dvh; /* মডার্ন মোবাইল ফিক্স */
+    height: -webkit-fill-available;
+    height: 100dvh;
     width: 100%;
     overflow: hidden;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -36,11 +35,10 @@ html, body {
 
 #app {
     display: flex;
-    height: 100%; /* বডি থেকে হাইট ইনহেরিট করবে */
+    height: 100%;
     width: 100%;
 }
 
-/* Sidebar */
 .sidebar {
     width: 260px;
     background-color: var(--sidebar-bg);
@@ -135,7 +133,6 @@ html, body {
     margin-bottom: 4px;
     color: var(--text-primary);
     font-size: 14px;
-    group: chat-item;
 }
 
 .chat-item:hover, .chat-item.active {
@@ -164,7 +161,6 @@ html, body {
     border-top: 1px solid var(--border-color);
 }
 
-/* Main Content */
 #main-content {
     flex: 1;
     display: flex;
@@ -258,7 +254,6 @@ html, body {
     font-size: 15px;
 }
 
-/* Markdown Styles */
 .text-content p { margin-bottom: 1em; }
 .text-content p:last-child { margin-bottom: 0; }
 .text-content pre { margin: 1em 0; border-radius: 6px; }
@@ -303,7 +298,6 @@ html, body {
     color: var(--text-primary);
 }
 
-/* Input Area */
 .input-container {
     padding: 20px;
     background: linear-gradient(180deg, transparent, var(--bg-color) 40%);
@@ -353,7 +347,6 @@ html, body {
     cursor: not-allowed;
 }
 
-/* Modal */
 .modal-overlay {
     position: fixed;
     top: 0;
@@ -432,7 +425,6 @@ html, body {
     justify-content: flex-end;
 }
 
-/* Typing Indicator */
 .typing-indicator {
     display: inline-block;
     width: 10px;
@@ -447,7 +439,6 @@ html, body {
     50% { opacity: 0; }
 }
 
-/* Mobile Responsive */
 .mobile-only {
     display: none;
 }
