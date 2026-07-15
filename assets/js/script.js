@@ -1,330 +1,470 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const STORAGE_KEY_CHATS = 'local_ai_chats';
-    const STORAGE_KEY_SETTINGS = 'local_ai_settings';
-    const STORAGE_KEY_CURRENT_CHAT = 'local_ai_current_chat';
+// Configure Marked.js for Highlight.js integration and custom renderer for copy buttons
+const renderer = new marked.Renderer();
+renderer.code = function(code, language) {
+    const validLang = !!(language && hljs.getLanguage(language));
+    const lang = validLang ? language : 'plaintext';
+    const highlighted = validLang ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value;
+    
+    return `
+        <div class="code-wrapper">
+            <div class="code-header">
+                <span>${lang}</span>
+                <button class="copy-code-btn">
+                    <i class="ph ph-copy"></i> Copy
+                </button>
+            </div>
+            <pre><code class="hljs ${lang}">${highlighted}</code></pre>
+        </div>
+    `;
+};
+marked.setOptions({
+    renderer: renderer,
+    breaks: true,
+    gfm: true
+});
 
-    let chats = [];
-    let currentChatId = null;
-    let settings = {
-        url: '',
-        model: 'dolphin-llama3',
-        stream: true
+// App State
+let chats = JSON.parse(localStorage.getItem('ai_chats')) || [];
+let currentChatId = null;
+let isGenerating = false;
+
+// Default Settings
+let settings = JSON.parse(localStorage.getItem('ai_settings')) || {
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'gpt-4o-mini',
+    stream: true
+};
+
+// DOM Elements
+const elements = {
+    sidebar: document.getElementById('sidebar'),
+    overlay: document.getElementById('sidebar-overlay'),
+    menuBtn: document.getElementById('menu-btn'),
+    newChatBtn: document.getElementById('new-chat-btn'),
+    chatHistory: document.getElementById('chat-history'),
+    chatContainer: document.getElementById('chat-container'),
+    welcomeScreen: document.getElementById('welcome-screen'),
+    chatTitle: document.getElementById('current-chat-title'),
+    messageInput: document.getElementById('message-input'),
+    sendBtn: document.getElementById('send-btn'),
+    
+    // Settings Modals
+    settingsModal: document.getElementById('settings-modal'),
+    settingsOpenBtn: document.getElementById('settings-open-btn'),
+    settingsCloseBtn: document.getElementById('settings-close-btn'),
+    settingsSaveBtn: document.getElementById('settings-save-btn'),
+    
+    // Setting Inputs
+    apiUrl: document.getElementById('api-url'),
+    apiKey: document.getElementById('api-key'),
+    apiModel: document.getElementById('api-model'),
+    apiStream: document.getElementById('api-stream')
+};
+
+// Initialize App
+function init() {
+    loadSettingsToUI();
+    renderSidebar();
+    
+    if (chats.length > 0) {
+        loadChat(chats[0].id);
+    } else {
+        createNewChat();
+    }
+    
+    setupEventListeners();
+}
+
+// Event Listeners
+function setupEventListeners() {
+    // Mobile Sidebar
+    elements.menuBtn.addEventListener('click', () => {
+        elements.sidebar.classList.add('open');
+        elements.overlay.classList.add('active');
+    });
+    
+    elements.overlay.addEventListener('click', closeSidebar);
+    
+    // Input Auto-resize & Submit
+    elements.messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+        elements.sendBtn.disabled = this.value.trim().length === 0 || isGenerating;
+    });
+
+    elements.messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!elements.sendBtn.disabled) handleSend();
+        }
+    });
+
+    elements.sendBtn.addEventListener('click', handleSend);
+
+    // Chat Management
+    elements.newChatBtn.addEventListener('click', () => {
+        createNewChat();
+        closeSidebar();
+    });
+
+    // Settings
+    elements.settingsOpenBtn.addEventListener('click', openSettings);
+    elements.settingsCloseBtn.addEventListener('click', closeSettings);
+    elements.settingsSaveBtn.addEventListener('click', saveSettings);
+    
+    // Global delegation for dynamic elements
+    document.addEventListener('click', (e) => {
+        // Copy Code delegation
+        const copyBtn = e.target.closest('.copy-code-btn');
+        if (copyBtn) {
+            const codeBlock = copyBtn.closest('.code-wrapper').querySelector('code');
+            navigator.clipboard.writeText(codeBlock.innerText).then(() => {
+                const originalHtml = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<i class="ph ph-check"></i> Copied';
+                setTimeout(() => copyBtn.innerHTML = originalHtml, 2000);
+            });
+        }
+    });
+}
+
+function closeSidebar() {
+    elements.sidebar.classList.remove('open');
+    elements.overlay.classList.remove('active');
+}
+
+// --- Settings Logic ---
+function loadSettingsToUI() {
+    elements.apiUrl.value = settings.baseUrl;
+    elements.apiKey.value = settings.apiKey;
+    elements.apiModel.value = settings.model;
+    elements.apiStream.checked = settings.stream;
+}
+
+function openSettings() {
+    loadSettingsToUI();
+    elements.settingsModal.classList.add('active');
+}
+
+function closeSettings() {
+    elements.settingsModal.classList.remove('active');
+}
+
+function saveSettings() {
+    settings = {
+        baseUrl: elements.apiUrl.value.trim().replace(/\/$/, ''),
+        apiKey: elements.apiKey.value.trim(),
+        model: elements.apiModel.value.trim(),
+        stream: elements.apiStream.checked
     };
-    let isGenerating = false;
-    let currentAbortController = null;
+    localStorage.setItem('ai_settings', JSON.stringify(settings));
+    closeSettings();
+}
 
-    const chatListEl = document.getElementById('chat-list');
-    const chatContainerEl = document.getElementById('chat-container');
-    const welcomeScreenEl = document.getElementById('welcome-screen');
-    const messageInputEl = document.getElementById('message-input');
-    const sendBtnEl = document.getElementById('send-btn');
-    const currentChatTitleEl = document.getElementById('current-chat-title');
-    const sidebarEl = document.getElementById('sidebar');
-    const menuBtnEl = document.getElementById('menu-btn');
-    const closeSidebarBtnEl = document.getElementById('close-sidebar-btn');
-    const newChatBtnEl = document.getElementById('new-chat-btn');
-    const settingsModalEl = document.getElementById('settings-modal');
-    const settingsBtnEl = document.getElementById('settings-btn');
-    const closeSettingsBtnEl = document.getElementById('close-settings-btn');
-    const saveSettingsBtnEl = document.getElementById('save-settings-btn');
-    const backendUrlInput = document.getElementById('backend-url');
-    const modelNameInput = document.getElementById('model-name');
-    const streamToggleInput = document.getElementById('stream-toggle');
+// --- Chat Management ---
+function createNewChat() {
+    const newChat = {
+        id: Date.now().toString(),
+        title: 'New Chat',
+        messages: []
+    };
+    chats.unshift(newChat);
+    saveChats();
+    loadChat(newChat.id);
+    renderSidebar();
+}
 
-    if (typeof marked !== 'undefined') {
-        const renderer = new marked.Renderer();
-        renderer.code = function (code, language) {
-            const validLanguage = (typeof hljs !== 'undefined' && hljs.getLanguage(language)) ? language : 'plaintext';
-            const highlighted = (typeof hljs !== 'undefined') ? hljs.highlight(code, { language: validLanguage }).value : code;
-            const encodedCode = encodeURIComponent(code);
-            return `
-                <div class="code-block-wrapper">
-                    <div class="code-block-header">
-                        <span class="code-lang">${validLanguage}</span>
-                        <button class="copy-btn" data-code="${encodedCode}">
-                            <i class="fas fa-copy"></i> Copy
-                        </button>
-                    </div>
-                    <pre><code class="hljs ${validLanguage}">${highlighted}</code></pre>
-                </div>
-            `;
-        };
-        marked.setOptions({ renderer });
-    }
+function saveChats() {
+    localStorage.setItem('ai_chats', JSON.stringify(chats));
+}
 
-    function init() {
-        loadSettings();
-        loadChats();
-        setupEventListeners();
-        if (!currentChatId && chats.length > 0) switchChat(chats[0].id);
-        else if (currentChatId) switchChat(currentChatId);
-        else createNewChat();
-    }
+function getChat(id) {
+    return chats.find(c => c.id === id);
+}
 
-    function loadSettings() {
-        const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-        if (saved) settings = { ...settings, ...JSON.parse(saved) };
-        backendUrlInput.value = settings.url;
-        modelNameInput.value = settings.model;
-        streamToggleInput.checked = settings.stream;
-    }
-
-    function saveSettings() {
-        settings.url = backendUrlInput.value.trim();
-        settings.model = modelNameInput.value.trim();
-        settings.stream = streamToggleInput.checked;
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    }
-
-    function loadChats() {
-        const saved = localStorage.getItem(STORAGE_KEY_CHATS);
-        if (saved) chats = JSON.parse(saved);
-        currentChatId = localStorage.getItem(STORAGE_KEY_CURRENT_CHAT);
-        renderChatList();
-    }
-
-    function saveChats() {
-        localStorage.setItem(STORAGE_KEY_CHATS, JSON.stringify(chats));
-        if (currentChatId) localStorage.setItem(STORAGE_KEY_CURRENT_CHAT, currentChatId);
-        else localStorage.removeItem(STORAGE_KEY_CURRENT_CHAT);
-    }
-
-    function generateId() { return Math.random().toString(36).substr(2, 9); }
-
-    function createNewChat() {
-        const newChat = { id: generateId(), title: 'New Chat', messages: [], createdAt: Date.now() };
-        chats.unshift(newChat);
-        saveChats();
-        switchChat(newChat.id);
-    }
-
-    window.deleteChat = function(id, e) {
-        if(e) e.stopPropagation();
-        chats = chats.filter(c => c.id !== id);
-        if (currentChatId === id) currentChatId = chats.length > 0 ? chats[0].id : null;
-        saveChats();
-        renderChatList();
-        if (currentChatId) switchChat(currentChatId);
-        else createNewChat();
-    }
-
-    window.renameChat = function(id, e) {
-        if(e) e.stopPropagation();
-        const chat = chats.find(c => c.id === id);
-        if (!chat) return;
-        const newTitle = prompt('Enter new chat name:', chat.title);
-        if (newTitle && newTitle.trim()) {
-            chat.title = newTitle.trim();
-            saveChats();
-            renderChatList();
-            if (currentChatId === id) currentChatTitleEl.textContent = chat.title;
-        }
-    }
-
-    window.switchChat = function(id) {
-        currentChatId = id;
-        saveChats();
-        renderChatList();
-        renderCurrentChat();
-        if (window.innerWidth <= 768) sidebarEl.classList.remove('open');
-    }
-
-    function renderChatList() {
-        chatListEl.innerHTML = '';
-        chats.forEach(chat => {
-            const li = document.createElement('li');
-            li.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
-            li.onclick = () => window.switchChat(chat.id);
-            li.innerHTML = `
-                <i class="far fa-message"></i>
-                <span class="chat-item-title">${chat.title}</span>
-                <div class="chat-item-actions">
-                    <button class="icon-btn" onclick="window.renameChat('${chat.id}', event)"><i class="fas fa-edit"></i></button>
-                    <button class="icon-btn" onclick="window.deleteChat('${chat.id}', event)"><i class="fas fa-trash"></i></button>
-                </div>
-            `;
-            chatListEl.appendChild(li);
+function loadChat(id) {
+    currentChatId = id;
+    const chat = getChat(id);
+    if (!chat) return;
+    
+    elements.chatTitle.textContent = chat.title;
+    elements.chatContainer.innerHTML = '';
+    
+    if (chat.messages.length === 0) {
+        elements.chatContainer.appendChild(elements.welcomeScreen);
+        elements.welcomeScreen.style.display = 'flex';
+    } else {
+        elements.welcomeScreen.style.display = 'none';
+        chat.messages.forEach(msg => {
+            renderMessage(msg.role, msg.content, false);
         });
+        scrollToBottom();
     }
+    
+    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    const activeItem = document.getElementById(`chat-${id}`);
+    if (activeItem) activeItem.classList.add('active');
+}
 
-    function renderCurrentChat() {
-        const chat = chats.find(c => c.id === currentChatId);
-        if (!chat) return;
-        currentChatTitleEl.textContent = chat.title;
-        const messages = Array.from(chatContainerEl.children).filter(el => el.id !== 'welcome-screen');
-        messages.forEach(m => m.remove());
-
-        if (chat.messages.length === 0) {
-            welcomeScreenEl.style.display = 'flex';
-        } else {
-            welcomeScreenEl.style.display = 'none';
-            chat.messages.forEach(msg => appendMessageUI(msg.role, msg.content));
-            scrollToBottom();
-        }
-    }
-
-    function appendMessageUI(role, content) {
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${role}`;
-        const iconClass = role === 'user' ? 'fa-user' : 'fa-robot';
-        const parsedContent = (content && typeof marked !== 'undefined') ? marked.parse(content) : (content || '<div class="typing-indicator"></div>');
-
-        msgDiv.innerHTML = `
-            <div class="message-content">
-                <div class="avatar ${role}"><i class="fas ${iconClass}"></i></div>
-                <div class="text-content markdown-body">${parsedContent}</div>
+function renderSidebar() {
+    elements.chatHistory.innerHTML = '';
+    chats.forEach(chat => {
+        const div = document.createElement('div');
+        div.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
+        div.id = `chat-${chat.id}`;
+        div.innerHTML = `
+            <div class="chat-item-title">${DOMPurify.sanitize(chat.title)}</div>
+            <div class="chat-item-actions">
+                <button class="action-btn rename" title="Rename"><i class="ph ph-pencil-simple"></i></button>
+                <button class="action-btn delete" title="Delete"><i class="ph ph-trash"></i></button>
             </div>
         `;
-        chatContainerEl.appendChild(msgDiv);
-        return msgDiv;
-    }
 
-    function updateMessageUI(msgElement, content) {
-        const textContentEl = msgElement.querySelector('.text-content');
-        textContentEl.innerHTML = (typeof marked !== 'undefined') ? marked.parse(content) : content;
-    }
-
-    function scrollToBottom() {
-        chatContainerEl.scrollTo({ top: chatContainerEl.scrollHeight, behavior: 'smooth' });
-    }
-
-    async function sendMessage() {
-        if (isGenerating) return;
-        const content = messageInputEl.value.trim();
-        if (!content) return;
-
-        const chat = chats.find(c => c.id === currentChatId);
-        if (!chat) return;
-
-        if (chat.messages.length === 0) {
-            chat.title = content.split(' ').slice(0, 4).join(' ') + '...';
-            renderChatList();
-            currentChatTitleEl.textContent = chat.title;
-        }
-
-        chat.messages.push({ role: 'user', content });
-        saveChats();
-        messageInputEl.value = '';
-        messageInputEl.style.height = 'auto';
-        updateSendButtonState();
-        welcomeScreenEl.style.display = 'none';
-        appendMessageUI('user', content);
-        scrollToBottom();
-
-        isGenerating = true;
-        currentAbortController = new AbortController();
-        const assistantMsgEl = appendMessageUI('assistant', '');
-        scrollToBottom();
-
-        try {
-            const payload = {
-                model: settings.model,
-                messages: chat.messages.map(m => ({ role: m.role, content: m.content })),
-                stream: settings.stream
-            };
-
-            const response = await fetch(settings.url, {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Bypass-Tunnel-Reminder': 'true',
-                    'ngrok-skip-browser-warning': 'true'
-                },
-                body: JSON.stringify(payload),
-                signal: currentAbortController.signal
-            });
-
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-            let fullResponse = '';
-            if (settings.stream) {
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop(); 
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const dataStr = line.substring(6).trim();
-                            if (dataStr === '[DONE]') continue;
-                            try {
-                                const data = JSON.parse(dataStr);
-                                const chunk = data.choices[0]?.delta?.content || '';
-                                if (chunk) {
-                                    fullResponse += chunk;
-                                    updateMessageUI(assistantMsgEl, fullResponse);
-                                    scrollToBottom();
-                                }
-                            } catch (e) {}
-                        }
-                    }
-                }
+        div.addEventListener('click', (e) => {
+            if (e.target.closest('.rename')) {
+                renameChat(chat.id);
+            } else if (e.target.closest('.delete')) {
+                deleteChat(chat.id);
             } else {
-                const data = await response.json();
-                fullResponse = data.choices[0].message.content;
-                updateMessageUI(assistantMsgEl, fullResponse);
-                scrollToBottom();
-            }
-            chat.messages.push({ role: 'assistant', content: fullResponse });
-            saveChats();
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                updateMessageUI(assistantMsgEl, `**Error:** Could not connect. Details: \`${error.message}\``);
-            }
-        } finally {
-            isGenerating = false;
-            currentAbortController = null;
-            updateSendButtonState();
-        }
-    }
-
-    function setupEventListeners() {
-        messageInputEl.addEventListener('input', () => {
-            messageInputEl.style.height = 'auto';
-            messageInputEl.style.height = (messageInputEl.scrollHeight) + 'px';
-            messageInputEl.style.overflowY = messageInputEl.scrollHeight > 200 ? 'auto' : 'hidden';
-            updateSendButtonState();
-        });
-
-        messageInputEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
+                loadChat(chat.id);
+                closeSidebar();
             }
         });
-
-        sendBtnEl.addEventListener('click', sendMessage);
-        newChatBtnEl.addEventListener('click', createNewChat);
-        menuBtnEl.addEventListener('click', () => sidebarEl.classList.add('open'));
-        closeSidebarBtnEl.addEventListener('click', () => sidebarEl.classList.remove('open'));
-        settingsBtnEl.addEventListener('click', () => settingsModalEl.classList.remove('hidden'));
-        closeSettingsBtnEl.addEventListener('click', () => settingsModalEl.classList.add('hidden'));
         
-        saveSettingsBtnEl.addEventListener('click', () => {
-            saveSettings();
-            settingsModalEl.classList.add('hidden');
+        elements.chatHistory.appendChild(div);
+    });
+}
+
+function renameChat(id) {
+    const chat = getChat(id);
+    const newTitle = prompt('Enter new chat name:', chat.title);
+    if (newTitle && newTitle.trim()) {
+        chat.title = newTitle.trim();
+        saveChats();
+        renderSidebar();
+        if (currentChatId === id) elements.chatTitle.textContent = chat.title;
+    }
+}
+
+function deleteChat(id) {
+    if (confirm('Are you sure you want to delete this chat?')) {
+        chats = chats.filter(c => c.id !== id);
+        saveChats();
+        if (chats.length === 0) {
+            createNewChat();
+        } else if (currentChatId === id) {
+            loadChat(chats[0].id);
+        }
+        renderSidebar();
+    }
+}
+
+function updateChatTitle(chat, firstMessage) {
+    if (chat.title === 'New Chat') {
+        const title = firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
+        chat.title = title;
+        elements.chatTitle.textContent = title;
+        saveChats();
+        renderSidebar();
+    }
+}
+
+// --- UI Rendering ---
+function renderMessage(role, content, isStreaming = false) {
+    if (elements.welcomeScreen.style.display !== 'none') {
+        elements.welcomeScreen.style.display = 'none';
+    }
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message';
+    
+    const icon = role === 'user' ? '<i class="ph ph-user"></i>' : '<i class="ph ph-robot"></i>';
+    const avatarClass = role === 'user' ? 'user-avatar' : 'ai-avatar';
+    
+    // Parse Markdown securely
+    const parsedContent = DOMPurify.sanitize(marked.parse(content));
+    
+    msgDiv.innerHTML = `
+        <div class="avatar ${avatarClass}">${icon}</div>
+        <div class="message-content markdown-body" data-raw="${encodeURIComponent(content)}">
+            ${parsedContent}
+        </div>
+    `;
+    
+    elements.chatContainer.appendChild(msgDiv);
+    return msgDiv;
+}
+
+function showTypingIndicator() {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message typing-msg';
+    msgDiv.innerHTML = `
+        <div class="avatar ai-avatar"><i class="ph ph-robot"></i></div>
+        <div class="message-content">
+            <div class="typing-indicator">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+        </div>
+    `;
+    elements.chatContainer.appendChild(msgDiv);
+    scrollToBottom();
+    return msgDiv;
+}
+
+function removeTypingIndicator() {
+    const typingMsg = elements.chatContainer.querySelector('.typing-msg');
+    if (typingMsg) typingMsg.remove();
+}
+
+function scrollToBottom() {
+    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+}
+
+// --- API Interaction ---
+async function handleSend() {
+    if (!settings.apiKey) {
+        alert('Please configure your API Key in settings first.');
+        openSettings();
+        return;
+    }
+
+    const content = elements.messageInput.value.trim();
+    if (!content) return;
+
+    // Reset input
+    elements.messageInput.value = '';
+    elements.messageInput.style.height = 'auto';
+    elements.sendBtn.disabled = true;
+    isGenerating = true;
+
+    // Process User Message
+    const chat = getChat(currentChatId);
+    chat.messages.push({ role: 'user', content });
+    renderMessage('user', content);
+    updateChatTitle(chat, content);
+    saveChats();
+    scrollToBottom();
+
+    const typingEl = showTypingIndicator();
+
+    try {
+        const payload = {
+            model: settings.model,
+            messages: chat.messages,
+            stream: settings.stream
+        };
+
+        const response = await fetch(`${settings.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${settings.apiKey}`
+            },
+            body: JSON.stringify(payload)
         });
 
-        document.addEventListener('click', (e) => {
-            const copyBtn = e.target.closest('.copy-btn');
-            if (copyBtn) {
-                const code = decodeURIComponent(copyBtn.getAttribute('data-code'));
-                navigator.clipboard.writeText(code).then(() => {
-                    const originalHTML = copyBtn.innerHTML;
-                    copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-                    setTimeout(() => { copyBtn.innerHTML = originalHTML; }, 2000);
-                });
+        if (!response.ok) {
+            const errBody = await response.text();
+            throw new Error(`HTTP Error ${response.status}: ${errBody}`);
+        }
+
+        removeTypingIndicator();
+
+        if (settings.stream) {
+            await handleStreamingResponse(response, chat);
+        } else {
+            await handleStandardResponse(response, chat);
+        }
+
+    } catch (error) {
+        removeTypingIndicator();
+        console.error(error);
+        renderError(error.message);
+    } finally {
+        isGenerating = false;
+        elements.sendBtn.disabled = elements.messageInput.value.trim().length === 0;
+    }
+}
+
+async function handleStandardResponse(response, chat) {
+    const data = await response.json();
+    const reply = data.choices[0].message.content || '';
+    
+    chat.messages.push({ role: 'assistant', content: reply });
+    saveChats();
+    renderMessage('assistant', reply);
+    scrollToBottom();
+}
+
+async function handleStreamingResponse(response, chat) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    
+    // Create empty message container for streaming
+    const msgEl = renderMessage('assistant', '');
+    const contentEl = msgEl.querySelector('.message-content');
+    
+    let fullResponse = '';
+    let buffer = '';
+    
+    chat.messages.push({ role: 'assistant', content: '' }); // placeholder
+    const msgIndex = chat.messages.length - 1;
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete lines in buffer
+
+            for (const line of lines) {
+                const cleanLine = line.trim();
+                if (!cleanLine || !cleanLine.startsWith('data: ')) continue;
+                
+                const dataStr = cleanLine.slice(6);
+                if (dataStr === '[DONE]') continue;
+                
+                try {
+                    const parsed = JSON.parse(dataStr);
+                    const delta = parsed.choices[0]?.delta?.content;
+                    if (delta) {
+                        fullResponse += delta;
+                        // Update UI progressively
+                        contentEl.innerHTML = DOMPurify.sanitize(marked.parse(fullResponse));
+                        scrollToBottom();
+                    }
+                } catch (e) {
+                    console.warn("Chunk parsing error:", e, "Data:", dataStr);
+                }
             }
-        });
+        }
+    } finally {
+        // Save final content
+        chat.messages[msgIndex].content = fullResponse;
+        saveChats();
+        // Final render to ensure syntax highlighting runs on complete blocks
+        contentEl.innerHTML = DOMPurify.sanitize(marked.parse(fullResponse));
+        scrollToBottom();
     }
+}
 
-    function updateSendButtonState() {
-        sendBtnEl.disabled = messageInputEl.value.trim() === '' || isGenerating;
-    }
+function renderError(message) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message';
+    msgDiv.innerHTML = `
+        <div class="avatar ai-avatar" style="background-color: var(--danger)"><i class="ph ph-warning"></i></div>
+        <div class="message-content error-msg">
+            <p><strong>Error Generating Response:</strong></p>
+            <p>${DOMPurify.sanitize(message)}</p>
+        </div>
+    `;
+    elements.chatContainer.appendChild(msgDiv);
+    scrollToBottom();
+}
 
-    init();
-});
+// Start
+init();
