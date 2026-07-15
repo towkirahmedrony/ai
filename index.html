@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local AI Chat</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Markdown & Syntax Highlighting -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+
+    <!-- App Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <button id="new-chat-btn" class="btn primary-btn">
+                    <i class="fas fa-plus"></i> New Chat
+                </button>
+                <button id="close-sidebar-btn" class="mobile-only icon-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="chat-list-container">
+                <ul id="chat-list" class="chat-list">
+                    <!-- Chat items will be dynamically injected here -->
+                </ul>
+            </div>
+            
+            <div class="sidebar-footer">
+                <button id="settings-btn" class="btn secondary-btn">
+                    <i class="fas fa-cog"></i> Settings
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main id="main-content">
+            <header class="top-bar">
+                <button id="menu-btn" class="icon-btn">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h1 id="current-chat-title">New Chat</h1>
+            </header>
+
+            <div id="chat-container" class="chat-container">
+                <!-- Messages will be dynamically injected here -->
+                <div id="welcome-screen" class="welcome-screen">
+                    <h2>Local AI Chat</h2>
+                    <p>Connect to your local LLM (Ollama, vLLM, LM Studio) completely privately.</p>
+                </div>
+            </div>
+
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea id="message-input" placeholder="Message your local AI..." rows="1"></textarea>
+                    <button id="send-btn" class="icon-btn send-btn" disabled>
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal-overlay hidden">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button id="close-settings-btn" class="icon-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="backend-url">Backend URL (OpenAI Compatible Endpoint)</label>
+                        <input type="text" id="backend-url" placeholder="http://127.0.0.1:11434/v1/chat/completions">
+                    </div>
+                    <div class="form-group">
+                        <label for="model-name">Model Name</label>
+                        <input type="text" id="model-name" placeholder="llama3">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="stream-toggle">
+                        <label for="stream-toggle">Enable Streaming Responses</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="save-settings-btn" class="btn primary-btn">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Script -->
+    <script src="script.js"></script>
+</body>
+</html>
