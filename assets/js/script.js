@@ -4,7 +4,7 @@ renderer.code = function(code, language) {
     const validLang = !!(language && hljs.getLanguage(language));
     const lang = validLang ? language : 'plaintext';
     const highlighted = validLang ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value;
-    
+
     return `
         <div class="code-wrapper">
             <div class="code-header">
@@ -48,13 +48,13 @@ const elements = {
     chatTitle: document.getElementById('current-chat-title'),
     messageInput: document.getElementById('message-input'),
     sendBtn: document.getElementById('send-btn'),
-    
+
     // Settings Modals
     settingsModal: document.getElementById('settings-modal'),
     settingsOpenBtn: document.getElementById('settings-open-btn'),
     settingsCloseBtn: document.getElementById('settings-close-btn'),
     settingsSaveBtn: document.getElementById('settings-save-btn'),
-    
+
     // Setting Inputs
     apiUrl: document.getElementById('api-url'),
     apiKey: document.getElementById('api-key'),
@@ -66,13 +66,13 @@ const elements = {
 function init() {
     loadSettingsToUI();
     renderSidebar();
-    
+
     if (chats.length > 0) {
         loadChat(chats[0].id);
     } else {
         createNewChat();
     }
-    
+
     setupEventListeners();
 }
 
@@ -83,9 +83,9 @@ function setupEventListeners() {
         elements.sidebar.classList.add('open');
         elements.overlay.classList.add('active');
     });
-    
+
     elements.overlay.addEventListener('click', closeSidebar);
-    
+
     // Input Auto-resize & Submit
     elements.messageInput.addEventListener('input', function() {
         this.style.height = 'auto';
@@ -112,7 +112,7 @@ function setupEventListeners() {
     elements.settingsOpenBtn.addEventListener('click', openSettings);
     elements.settingsCloseBtn.addEventListener('click', closeSettings);
     elements.settingsSaveBtn.addEventListener('click', saveSettings);
-    
+
     // Global delegation for dynamic elements
     document.addEventListener('click', (e) => {
         // Copy Code delegation
@@ -186,10 +186,10 @@ function loadChat(id) {
     currentChatId = id;
     const chat = getChat(id);
     if (!chat) return;
-    
+
     elements.chatTitle.textContent = chat.title;
     elements.chatContainer.innerHTML = '';
-    
+
     if (chat.messages.length === 0) {
         elements.chatContainer.appendChild(elements.welcomeScreen);
         elements.welcomeScreen.style.display = 'flex';
@@ -200,7 +200,7 @@ function loadChat(id) {
         });
         scrollToBottom();
     }
-    
+
     document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
     const activeItem = document.getElementById(`chat-${id}`);
     if (activeItem) activeItem.classList.add('active');
@@ -230,7 +230,7 @@ function renderSidebar() {
                 closeSidebar();
             }
         });
-        
+
         elements.chatHistory.appendChild(div);
     });
 }
@@ -277,20 +277,20 @@ function renderMessage(role, content, isStreaming = false) {
 
     const msgDiv = document.createElement('div');
     msgDiv.className = 'message';
-    
+
     const icon = role === 'user' ? '<i class="ph ph-user"></i>' : '<i class="ph ph-robot"></i>';
     const avatarClass = role === 'user' ? 'user-avatar' : 'ai-avatar';
-    
+
     // Parse Markdown securely
     const parsedContent = DOMPurify.sanitize(marked.parse(content));
-    
+
     msgDiv.innerHTML = `
         <div class="avatar ${avatarClass}">${icon}</div>
         <div class="message-content markdown-body" data-raw="${encodeURIComponent(content)}">
             ${parsedContent}
         </div>
     `;
-    
+
     elements.chatContainer.appendChild(msgDiv);
     return msgDiv;
 }
@@ -360,7 +360,8 @@ async function handleSend() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${settings.apiKey}`
+                'Authorization': `Bearer ${settings.apiKey}`,
+                'ngrok-skip-browser-warning': 'true'
             },
             body: JSON.stringify(payload)
         });
@@ -391,7 +392,7 @@ async function handleSend() {
 async function handleStandardResponse(response, chat) {
     const data = await response.json();
     const reply = data.choices[0].message.content || '';
-    
+
     chat.messages.push({ role: 'assistant', content: reply });
     saveChats();
     renderMessage('assistant', reply);
@@ -401,14 +402,14 @@ async function handleStandardResponse(response, chat) {
 async function handleStreamingResponse(response, chat) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
-    
+
     // Create empty message container for streaming
     const msgEl = renderMessage('assistant', '');
     const contentEl = msgEl.querySelector('.message-content');
-    
+
     let fullResponse = '';
     let buffer = '';
-    
+
     chat.messages.push({ role: 'assistant', content: '' }); // placeholder
     const msgIndex = chat.messages.length - 1;
 
@@ -416,7 +417,7 @@ async function handleStreamingResponse(response, chat) {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop(); // Keep incomplete lines in buffer
@@ -424,10 +425,10 @@ async function handleStreamingResponse(response, chat) {
             for (const line of lines) {
                 const cleanLine = line.trim();
                 if (!cleanLine || !cleanLine.startsWith('data: ')) continue;
-                
+
                 const dataStr = cleanLine.slice(6);
                 if (dataStr === '[DONE]') continue;
-                
+
                 try {
                     const parsed = JSON.parse(dataStr);
                     const delta = parsed.choices[0]?.delta?.content;
